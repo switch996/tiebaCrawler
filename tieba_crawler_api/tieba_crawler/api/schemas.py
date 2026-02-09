@@ -71,6 +71,7 @@ class ThreadListItem(BaseModel):
     thread_role: Optional[str] = None
     collection_year: Optional[int] = None
     collection_week: Optional[int] = None
+    process_status: Optional[str] = None
 
 
 class ImageItem(BaseModel):
@@ -129,3 +130,16 @@ class RelayTaskItem(BaseModel):
     last_error: Optional[str] = None
     created_at: str
     updated_at: str
+
+
+class BatchItem(BaseModel):
+    tid: int
+    category: Optional[str] = None
+    tags: Optional[List[str]] = None
+    ai_reply_content: Optional[str] = None
+    process_status: Optional[str] = None
+
+class BatchRequest(BaseModel):
+    items: List[BatchItem] = Field(..., min_length=1, max_length=500)
+
+

@@ -11,7 +11,6 @@ from tieba_crawler.logging_conf import setup_logging
 from tieba_crawler.settings import Settings
 from tieba_crawler.db.repo import Repo
 from tieba_crawler.jobs.crawl_threads import crawl_threads
-from tieba_crawler.jobs.download_images import download_images
 from tieba_crawler.jobs.relay_labeled_threads import relay_labeled_threads
 from tieba_crawler.jobs.sync_collections import sync_collections
 

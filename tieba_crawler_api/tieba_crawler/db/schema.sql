@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS threads (
 
   text TEXT,                  -- th.contents.text
   contents_json TEXT,         -- structured content
+  ai_reply_content TEXT,      -- AI generated reply content
+  process_status TEXT NOT NULL DEFAULT 'new',  -- new | fetched | processed | done
 
   -- labeling / routing
   category TEXT,              -- AI label, e.g. "交友贴"
@@ -64,8 +66,6 @@ CREATE TABLE IF NOT EXISTS images (
   UNIQUE(tid, url),
   FOREIGN KEY (tid) REFERENCES threads(tid) ON DELETE CASCADE
 );
-
-CREATE INDEX IF NOT EXISTS idx_images_status ON images(status);
 
 -- Relay queue: reply labeled threads into weekly collection threads
 CREATE TABLE IF NOT EXISTS relay_tasks (

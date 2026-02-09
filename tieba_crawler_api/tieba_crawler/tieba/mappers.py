@@ -107,6 +107,8 @@ def thread_to_row(th: Any) -> Dict[str, Any]:
 
         "text": content_text,
         "contents_json": contents_to_json(contents),
+        "ai_reply_content": None,
+        "process_status": "new",
 
         # labeling/routing fields (do not overwrite on upsert unless non-empty)
         "category": None,

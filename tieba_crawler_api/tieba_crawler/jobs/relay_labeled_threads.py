@@ -194,7 +194,6 @@ async def relay_labeled_threads(
         log.warning("DRY RUN: printing %s tasks then releasing them back to PENDING.", len(tasks))
         for t in tasks:
             source_tid = int(t["source_tid"])
-            imgs = repo.get_image_urls_for_tid(source_tid, limit=max_images)
             content = build_reply_content(
                 source_tid=source_tid,
                 title=t.get("title") or "",
@@ -202,7 +201,6 @@ async def relay_labeled_threads(
                 author_id=int(t.get("author_id") or 0),
                 create_time=int(t.get("create_time") or 0),
                 text=t.get("text") or "",
-                image_urls=imgs,
                 mode=mode,
                 max_text_chars=max_text_chars,
                 max_images=max_images,
@@ -222,7 +220,6 @@ async def relay_labeled_threads(
         target_tid = int(t["target_tid"])
         target_forum = str(t["target_forum"])
 
-        imgs = repo.get_image_urls_for_tid(source_tid, limit=max_images)
         content = build_reply_content(
             source_tid=source_tid,
             title=t.get("title") or "",
@@ -230,7 +227,6 @@ async def relay_labeled_threads(
             author_id=int(t.get("author_id") or 0),
             create_time=int(t.get("create_time") or 0),
             text=t.get("text") or "",
-            image_urls=imgs,
             mode=mode,
             max_text_chars=max_text_chars,
             max_images=max_images,

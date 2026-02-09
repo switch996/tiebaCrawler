@@ -66,6 +66,8 @@ class Repo:
         self._ensure_column("threads", "thread_role", "thread_role TEXT NOT NULL DEFAULT 'normal'")
         self._ensure_column("threads", "collection_year", "collection_year INTEGER")
         self._ensure_column("threads", "collection_week", "collection_week INTEGER")
+        self._ensure_column("threads", "ai_reply_content", "ai_reply_content TEXT")
+        self._ensure_column("threads", "process_status", "process_status TEXT NOT NULL DEFAULT 'new'")
 
         # relay_tasks extra columns if user had old relay version
         self._ensure_column("relay_tasks", "category", "category TEXT")
@@ -115,7 +117,7 @@ class Repo:
               create_time, last_time,
               reply_num, view_num,
               is_top, is_good, is_help, is_hide, is_share,
-              text, contents_json,
+              text, contents_json, ai_reply_content, process_status,
               category, tags_json, thread_role, collection_year, collection_week,
               updated_at
             )
@@ -127,7 +129,7 @@ class Repo:
               :create_time, :last_time,
               :reply_num, :view_num,
               :is_top, :is_good, :is_help, :is_hide, :is_share,
-              :text, :contents_json,
+              :text, :contents_json, :ai_reply_content, :process_status,
               :category, :tags_json, :thread_role, :collection_year, :collection_week,
               :updated_at
             )
@@ -150,7 +152,9 @@ class Repo:
               is_share=excluded.is_share,
               text=excluded.text,
               contents_json=excluded.contents_json,
-
+              ai_reply_content=COALESCE(excluded.ai_reply_content, threads.ai_reply_content),
+              process_status=COALESCE(excluded.process_status, threads.process_status),
+                
               category=CASE
                 WHEN excluded.category IS NOT NULL AND excluded.category != '' THEN excluded.category
                 ELSE threads.category

@@ -4,12 +4,11 @@ import asyncio
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.staticfiles import StaticFiles
 
 from tieba_crawler.logging_conf import setup_logging
 from tieba_crawler.settings import Settings
@@ -21,15 +20,16 @@ from tieba_crawler.api.schemas import (
     JobResponse,
     RelayLabeledRequest,
     RelayTaskItem,
-    SetCategoryRequest,
+    BatchRequest,
     SyncCollectionsRequest,
-    ThreadDetail,
     ThreadListItem,
 )
 from tieba_crawler.db.repo import Repo
 from tieba_crawler.jobs.crawl_threads import crawl_threads
 from tieba_crawler.jobs.relay_labeled_threads import relay_labeled_threads
 from tieba_crawler.jobs.sync_collections import sync_collections
+
+from tieba_crawler.tieba.mappers import utcnow_iso
 
 
 def _load_env() -> None:
@@ -97,15 +97,12 @@ def _row_to_image_item(row: Dict[str, Any], *, request: Request, settings: Setti
         id=int(row["id"]),
         tid=int(row["tid"]),
         url=str(row.get("url") or ""),
-        status=str(row.get("status") or ""),
-        local_path=local_path,
         hash=row.get("hash"),
         origin_src=row.get("origin_src"),
         src=row.get("src"),
         big_src=row.get("big_src"),
         show_width=row.get("show_width"),
         show_height=row.get("show_height"),
-        last_error=row.get("last_error"),
         updated_at=row.get("updated_at"),
     )
 
@@ -179,16 +176,17 @@ def create_app() -> FastAPI:
 
     @router.get("/threads", response_model=List[ThreadListItem])
     def list_threads(
-        request: Request,
-        forum: Optional[str] = Query(default=None, description="Forum name (fname)"),
-        category: Optional[str] = Query(default=None),
-        thread_role: Optional[str] = Query(default=None, description="normal | collection"),
-        q: Optional[str] = Query(default=None, description="Search keyword in title"),
-        since_ts: Optional[int] = Query(default=None, description="create_time >= since_ts"),
-        until_ts: Optional[int] = Query(default=None, description="create_time <= until_ts"),
-        limit: int = Query(default=50, ge=1, le=200),
-        offset: int = Query(default=0, ge=0),
-        order: str = Query(default="create_time_desc", description="create_time_desc | create_time_asc"),
+            request: Request,
+            forum: Optional[str] = Query(default=None),
+            category: Optional[str] = Query(default=None),
+            thread_role: Optional[str] = Query(default=None),
+            filter: Optional[str] = Query(default=None, description="uncategorized | categorized | collection"),
+            q: Optional[str] = Query(default=None),
+            since_ts: Optional[int] = Query(default=None),
+            until_ts: Optional[int] = Query(default=None),
+            limit: int = Query(default=50, ge=1, le=200),
+            offset: int = Query(default=0, ge=0),
+            order: str = Query(default="create_time_desc"),
     ) -> List[ThreadListItem]:
         s: Settings = request.app.state.settings
         repo = Repo(settings=s)
@@ -211,6 +209,18 @@ def create_app() -> FastAPI:
         if thread_role:
             where.append("thread_role=?")
             params.append(thread_role)
+
+        if filter == "uncategorized":
+            where.append("(category IS NULL OR category = '')")
+            where.append("thread_role = 'normal'")
+        elif filter == "categorized":
+            where.append("category IS NOT NULL AND category != ''")
+        elif filter == "collection":
+            where.append("thread_role = 'collection'")
+        elif filter == "new":
+            where.append("process_status = 'new'")
+        elif filter == "fetched":
+            where.append("process_status = 'fetched'")
 
         if q:
             where.append("title LIKE ?")
@@ -253,134 +263,38 @@ def create_app() -> FastAPI:
         repo.close()
         return out
 
-    @router.get("/threads/{tid}", response_model=ThreadDetail)
-    def get_thread_detail(request: Request, tid: int) -> ThreadDetail:
+    @router.post("/threads/batch")
+    def batch_update_threads(request: Request, payload: BatchRequest) -> Dict[str, Any]:
         s: Settings = request.app.state.settings
         repo = Repo(settings=s)
         repo.ensure_schema()
 
-        row = repo.conn().execute(
-            """
-            SELECT *
-            FROM threads
-            WHERE tid=?
-            LIMIT 1
-            """,
-            (int(tid),),
-        ).fetchone()
+        updated = 0
+        for item in payload.items:
+            tags_json = json.dumps(item.tags, ensure_ascii=False) if item.tags else None
 
-        if not row:
-            repo.close()
-            raise HTTPException(status_code=404, detail=f"Thread not found: tid={tid}")
+            # Auto-detect process_status if not explicitly set
+            status = item.process_status
+            if not status and (item.category and item.ai_reply_content):
+                status = "processed"
 
-        d = dict(row)
-        contents_raw = d.get("contents_json")
-        try:
-            contents = json.loads(contents_raw) if contents_raw else None
-        except Exception:
-            contents = None
+            repo.conn().execute(
+                """UPDATE threads
+                   SET category         = COALESCE(?, category),
+                       tags_json        = COALESCE(?, tags_json),
+                       ai_reply_content = COALESCE(?, ai_reply_content),
+                       process_status   = COALESCE(?, process_status),
+                       updated_at       = ?
+                   WHERE tid = ?""",
+                (item.category, tags_json, item.ai_reply_content, status, utcnow_iso(), item.tid),
+            )
+            updated += 1
 
-        tags = _parse_json_list(d.get("tags_json"))
-
-        img_rows = repo.conn().execute(
-            """
-            SELECT id, tid, url, status, local_path, hash, origin_src, src, big_src,
-                   show_width, show_height, last_error, updated_at
-            FROM images
-            WHERE tid=?
-            ORDER BY id ASC
-            """,
-            (int(tid),),
-        ).fetchall()
-
-        images = [_row_to_image_item(dict(ir), request=request, settings=s) for ir in img_rows]
-
+        repo.conn().commit()
         repo.close()
+        return {"ok": True, "updated": updated}
 
-        return ThreadDetail(
-            tid=int(d["tid"]),
-            fid=d.get("fid"),
-            fname=d.get("fname"),
-            title=d.get("title"),
-            author_id=d.get("author_id"),
-            author_name=d.get("author_name"),
-            agree=d.get("agree"),
-            pid=d.get("pid"),
-            create_time=d.get("create_time"),
-            last_time=d.get("last_time"),
-            reply_num=d.get("reply_num"),
-            view_num=d.get("view_num"),
-            is_top=d.get("is_top"),
-            is_good=d.get("is_good"),
-            is_help=d.get("is_help"),
-            is_hide=d.get("is_hide"),
-            is_share=d.get("is_share"),
-            text=d.get("text"),
-            contents=contents,
-            category=d.get("category"),
-            tags=tags,
-            thread_role=d.get("thread_role"),
-            collection_year=d.get("collection_year"),
-            collection_week=d.get("collection_week"),
-            updated_at=d.get("updated_at"),
-            source_url=f"https://tieba.baidu.com/p/{int(d['tid'])}",
-            images=images,
-        )
 
-    @router.post("/threads/{tid}/category")
-    def set_thread_category(request: Request, tid: int, payload: SetCategoryRequest) -> Dict[str, Any]:
-        s: Settings = request.app.state.settings
-        repo = Repo(settings=s)
-        repo.ensure_schema()
-
-        repo.set_thread_category(int(tid), payload.category, tags_json=payload.tags_json())
-        repo.close()
-        return {"ok": True, "tid": int(tid), "category": payload.category, "tags": payload.tags}
-
-    @router.get("/images", response_model=List[ImageItem])
-    def list_images(
-            request: Request,
-            forum: Optional[str] = Query(default=None),
-            tid: Optional[int] = Query(default=None),
-            limit: int = Query(default=50, ge=1, le=200),
-            offset: int = Query(default=0, ge=0),
-    ) -> List[ImageItem]:
-        s: Settings = request.app.state.settings
-        repo = Repo(settings=s)
-        repo.ensure_schema()
-
-        where: List[str] = []
-        params: List[Any] = []
-
-        if tid is not None:
-            where.append("images.tid=?")
-            params.append(int(tid))
-        if forum:
-            where.append("threads.fname=?")
-            params.append(forum)
-        elif s.default_forum:
-            where.append("threads.fname=?")
-            params.append(s.default_forum)
-
-        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
-
-        rows = repo.conn().execute(
-            f"""
-            SELECT images.id, images.tid, images.url,
-                   images.hash, images.origin_src, images.src, images.big_src,
-                   images.show_width, images.show_height, images.updated_at
-            FROM images
-            JOIN threads ON threads.tid = images.tid
-            {where_sql}
-            ORDER BY images.id DESC
-            LIMIT ? OFFSET ?
-            """,
-            (*params, int(limit), int(offset)),
-        ).fetchall()
-
-        out = [ImageItem(**dict(r)) for r in rows]
-        repo.close()
-        return out
 
     @router.get("/relay-tasks", response_model=List[RelayTaskItem])
     def list_relay_tasks(
@@ -559,6 +473,34 @@ def create_app() -> FastAPI:
         jobs: JobManager = request.app.state.jobs
         items = await jobs.list(limit=int(limit))
         return [JobResponse(**j.to_dict()) for j in items]
+
+    @router.post("/update")
+    async def update_threads(
+            request: Request,
+            forum: Optional[str] = Query(default=None),
+            max_pages: Optional[int] = Query(default=10),
+    ) -> Dict[str, Any]:
+        """Crawl new threads for a forum, then return stats."""
+        s: Settings = request.app.state.settings
+        target_forum = forum or s.default_forum
+        if not target_forum:
+            raise HTTPException(status_code=400, detail="Forum is required")
+
+        await crawl_threads(
+            forum=target_forum,
+            settings=s,
+            max_pages=max_pages,
+        )
+
+        # Return fresh stats
+        repo = Repo(settings=s)
+        repo.ensure_schema()
+        count = repo.conn().execute(
+            "SELECT COUNT(1) AS c FROM threads WHERE fname=?", (target_forum,)
+        ).fetchone()["c"]
+        repo.close()
+
+        return {"ok": True, "forum": target_forum, "threads_total": count}
 
     app.include_router(router)
     return app
