@@ -17,7 +17,6 @@ from tieba_crawler.api.auth import require_api_key
 from tieba_crawler.api.job_manager import JobManager
 from tieba_crawler.api.schemas import (
     CrawlThreadsRequest,
-    DownloadImagesRequest,
     ImageItem,
     JobResponse,
     RelayLabeledRequest,
@@ -29,7 +28,6 @@ from tieba_crawler.api.schemas import (
 )
 from tieba_crawler.db.repo import Repo
 from tieba_crawler.jobs.crawl_threads import crawl_threads
-from tieba_crawler.jobs.download_images import download_images
 from tieba_crawler.jobs.relay_labeled_threads import relay_labeled_threads
 from tieba_crawler.jobs.sync_collections import sync_collections
 
@@ -71,31 +69,6 @@ def _parse_json_list(raw: Optional[str]) -> Optional[List[str]]:
         return None
     return None
 
-
-def _public_url_for_local_path(*, request: Request, settings: Settings, local_path: Optional[str]) -> Optional[str]:
-    if not local_path:
-        return None
-
-    try:
-        p = Path(local_path)
-        # normalize relative to data_dir
-        data_dir = Path(settings.data_dir)
-        if p.is_absolute():
-            try:
-                rel = p.relative_to(data_dir)
-            except Exception:
-                # Do not expose arbitrary absolute paths
-                return None
-        else:
-            rel = p
-        # /files is mounted to settings.data_dir
-        rel_posix = rel.as_posix().lstrip("/")
-        base = str(request.base_url).rstrip("/")
-        return f"{base}/files/{rel_posix}"
-    except Exception:
-        return None
-
-
 def _row_to_thread_list_item(row: Dict[str, Any]) -> ThreadListItem:
     tags = _parse_json_list(row.get("tags_json"))
     return ThreadListItem(
@@ -126,7 +99,6 @@ def _row_to_image_item(row: Dict[str, Any], *, request: Request, settings: Setti
         url=str(row.get("url") or ""),
         status=str(row.get("status") or ""),
         local_path=local_path,
-        public_url=_public_url_for_local_path(request=request, settings=settings, local_path=local_path),
         hash=row.get("hash"),
         origin_src=row.get("origin_src"),
         src=row.get("src"),
@@ -167,9 +139,6 @@ def create_app() -> FastAPI:
             allow_headers=["*"],
         )
 
-    # Serve DATA_DIR files (downloaded images) under /files
-    app.mount("/files", StaticFiles(directory=str(settings.data_dir), html=False), name="files")
-
     # --- basic ---
     @app.get("/health")
     def health() -> Dict[str, str]:
@@ -192,10 +161,6 @@ def create_app() -> FastAPI:
                 "initial_hours": s.initial_hours,
                 "overlap_seconds": s.overlap_seconds,
                 "max_pages": s.max_pages,
-            },
-            "image_downloader": {
-                "image_concurrency": s.image_concurrency,
-                "image_attempts": s.image_attempts,
             },
             "collection_rules": s.collection_rules,
             "relay": {
@@ -374,12 +339,11 @@ def create_app() -> FastAPI:
 
     @router.get("/images", response_model=List[ImageItem])
     def list_images(
-        request: Request,
-        status: Optional[str] = Query(default=None, description="PENDING | DOWNLOADING | DONE | ERROR"),
-        forum: Optional[str] = Query(default=None),
-        tid: Optional[int] = Query(default=None),
-        limit: int = Query(default=50, ge=1, le=200),
-        offset: int = Query(default=0, ge=0),
+            request: Request,
+            forum: Optional[str] = Query(default=None),
+            tid: Optional[int] = Query(default=None),
+            limit: int = Query(default=50, ge=1, le=200),
+            offset: int = Query(default=0, ge=0),
     ) -> List[ImageItem]:
         s: Settings = request.app.state.settings
         repo = Repo(settings=s)
@@ -388,9 +352,6 @@ def create_app() -> FastAPI:
         where: List[str] = []
         params: List[Any] = []
 
-        if status:
-            where.append("images.status=?")
-            params.append(status)
         if tid is not None:
             where.append("images.tid=?")
             params.append(int(tid))
@@ -405,9 +366,9 @@ def create_app() -> FastAPI:
 
         rows = repo.conn().execute(
             f"""
-            SELECT images.id, images.tid, images.url, images.status, images.local_path,
+            SELECT images.id, images.tid, images.url,
                    images.hash, images.origin_src, images.src, images.big_src,
-                   images.show_width, images.show_height, images.last_error, images.updated_at
+                   images.show_width, images.show_height, images.updated_at
             FROM images
             JOIN threads ON threads.tid = images.tid
             {where_sql}
@@ -417,7 +378,7 @@ def create_app() -> FastAPI:
             (*params, int(limit), int(offset)),
         ).fetchall()
 
-        out = [_row_to_image_item(dict(r), request=request, settings=s) for r in rows]
+        out = [ImageItem(**dict(r)) for r in rows]
         repo.close()
         return out
 
@@ -540,23 +501,6 @@ def create_app() -> FastAPI:
             return {"ok": True}
 
         job = await jobs.create("crawl_threads", _run)
-        return JobResponse(**job.to_dict())
-
-    @router.post("/jobs/download-images", response_model=JobResponse)
-    async def job_download_images(request: Request, payload: DownloadImagesRequest) -> JobResponse:
-        s: Settings = request.app.state.settings
-        jobs: JobManager = request.app.state.jobs
-
-        async def _run() -> Dict[str, Any]:
-            await download_images(
-                settings=s,
-                limit=payload.limit,
-                concurrency=payload.concurrency,
-                include_error=bool(payload.include_error),
-            )
-            return {"ok": True}
-
-        job = await jobs.create("download_images", _run)
         return JobResponse(**job.to_dict())
 
     @router.post("/jobs/sync-collections", response_model=JobResponse)

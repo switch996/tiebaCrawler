@@ -8,9 +8,9 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-from tieba_crawler_api.tieba_crawler.db.repo import Repo
-from tieba_crawler_api.tieba_crawler.settings import Settings
-from tieba_crawler_api.tieba_crawler.tieba.client import TiebaAPI
+from tieba_crawler.db.repo import Repo
+from tieba_crawler.settings import Settings
+from tieba_crawler.tieba.client import TiebaAPI
 
 log = logging.getLogger(__name__)
 

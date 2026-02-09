@@ -53,16 +53,13 @@ CREATE INDEX IF NOT EXISTS idx_threads_role ON threads(thread_role);
 CREATE TABLE IF NOT EXISTS images (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tid INTEGER NOT NULL,
-  url TEXT NOT NULL,                 -- canonical download url (prefer big_src)
+  url TEXT NOT NULL,
   hash TEXT,
   origin_src TEXT,
   src TEXT,
   big_src TEXT,
   show_width INTEGER,
   show_height INTEGER,
-  local_path TEXT,
-  status TEXT NOT NULL,              -- PENDING | DOWNLOADING | DONE | ERROR
-  last_error TEXT,
   updated_at TEXT NOT NULL,
   UNIQUE(tid, url),
   FOREIGN KEY (tid) REFERENCES threads(tid) ON DELETE CASCADE

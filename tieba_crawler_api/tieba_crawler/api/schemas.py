@@ -25,12 +25,6 @@ class CrawlThreadsRequest(BaseModel):
     max_pages: Optional[int] = Field(None, description="Safety limit")
 
 
-class DownloadImagesRequest(BaseModel):
-    limit: int = Field(200, ge=1, le=5000)
-    concurrency: Optional[int] = Field(None, ge=1, le=32)
-    include_error: bool = False
-
-
 class SyncCollectionsRequest(BaseModel):
     forum: str
     days: int = Field(120, ge=1, le=3650)
@@ -83,16 +77,12 @@ class ImageItem(BaseModel):
     id: int
     tid: int
     url: str
-    status: str
-    local_path: Optional[str] = None
-    public_url: Optional[str] = None
     hash: Optional[str] = None
     origin_src: Optional[str] = None
     src: Optional[str] = None
     big_src: Optional[str] = None
     show_width: Optional[int] = None
     show_height: Optional[int] = None
-    last_error: Optional[str] = None
     updated_at: Optional[str] = None
 
 

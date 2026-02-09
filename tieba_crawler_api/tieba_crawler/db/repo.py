@@ -249,13 +249,11 @@ class Repo:
             """
             INSERT INTO images (
               tid, url, hash, origin_src, src, big_src,
-              show_width, show_height,
-              local_path, status, last_error, updated_at
+              show_width, show_height, updated_at
             )
             VALUES (
               :tid, :url, :hash, :origin_src, :src, :big_src,
-              :show_width, :show_height,
-              NULL, :status, NULL, :updated_at
+              :show_width, :show_height, :updated_at
             )
             ON CONFLICT(tid, url) DO UPDATE SET
               hash=COALESCE(excluded.hash, images.hash),
@@ -264,74 +262,10 @@ class Repo:
               big_src=COALESCE(excluded.big_src, images.big_src),
               show_width=COALESCE(excluded.show_width, images.show_width),
               show_height=COALESCE(excluded.show_height, images.show_height),
-              status=CASE WHEN images.status='DONE' THEN 'DONE' ELSE excluded.status END,
               updated_at=excluded.updated_at
             """,
             img,
         )
-
-    def claim_image_tasks(self, limit: int, include_error: bool = False) -> List[Dict[str, Any]]:
-        statuses = ["PENDING"]
-        if include_error:
-            statuses.append("ERROR")
-
-        q_marks = ",".join(["?"] * len(statuses))
-        conn = self.conn()
-        with conn:  # transaction
-            rows = conn.execute(
-                f"""
-                SELECT images.id, images.tid, images.url, images.hash,
-                       images.origin_src, images.big_src, images.src,
-                       images.show_width, images.show_height,
-                       images.local_path, images.status,
-                       threads.fname AS forum
-                FROM images
-                JOIN threads ON threads.tid = images.tid
-                WHERE images.status IN ({q_marks})
-                ORDER BY images.id
-                LIMIT ?
-                """,
-                (*statuses, limit),
-            ).fetchall()
-
-            ids = [r["id"] for r in rows]
-            if ids:
-                id_marks = ",".join(["?"] * len(ids))
-                conn.execute(
-                    f"UPDATE images SET status='DOWNLOADING', updated_at=? WHERE id IN ({id_marks})",
-                    (utcnow_iso(), *ids),
-                )
-        return [dict(r) for r in rows]
-
-    def mark_image_done(self, image_id: int, local_path: str) -> None:
-        self.conn().execute(
-            """
-            UPDATE images
-            SET status='DONE', local_path=?, last_error=NULL, updated_at=?
-            WHERE id=?
-            """,
-            (local_path, utcnow_iso(), image_id),
-        )
-        self.conn().commit()
-
-    def mark_image_error(self, image_id: int, error: str) -> None:
-        self.conn().execute(
-            """
-            UPDATE images
-            SET status='ERROR', last_error=?, updated_at=?
-            WHERE id=?
-            """,
-            (error[:1000], utcnow_iso(), image_id),
-        )
-        self.conn().commit()
-
-    def reset_stuck_downloads(self) -> int:
-        cur = self.conn().execute(
-            "UPDATE images SET status='PENDING', updated_at=? WHERE status='DOWNLOADING'",
-            (utcnow_iso(),),
-        )
-        self.conn().commit()
-        return cur.rowcount
 
     def get_image_urls_for_tid(self, tid: int, limit: int = 3) -> List[str]:
         rows = self.conn().execute(

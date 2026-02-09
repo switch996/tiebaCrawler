@@ -58,10 +58,6 @@ class Settings:
     page_sleep_ms_min: int
     page_sleep_ms_max: int
 
-    # image downloader
-    image_concurrency: int
-    image_attempts: int
-
     # weekly collection detection: {category: [keyword1, keyword2]}
     collection_rules: dict
 
@@ -103,8 +99,6 @@ class Settings:
             request_attempts=_env_int("REQUEST_ATTEMPTS", 5),
             page_sleep_ms_min=_env_int("PAGE_SLEEP_MS_MIN", 200),
             page_sleep_ms_max=_env_int("PAGE_SLEEP_MS_MAX", 800),
-            image_concurrency=_env_int("IMAGE_CONCURRENCY", 4),
-            image_attempts=_env_int("IMAGE_ATTEMPTS", 3),
             collection_rules = _env_json("COLLECTION_RULES_JSON", collection_rules),
             relay_mode=os.getenv("RELAY_MODE", "link"),
             relay_max_posts=_env_int("RELAY_MAX_POSTS", 2),

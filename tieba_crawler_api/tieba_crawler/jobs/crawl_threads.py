@@ -6,10 +6,10 @@ import random
 import time
 from typing import Optional
 
-from tieba_crawler_api.tieba_crawler.db.repo import Repo
-from tieba_crawler_api.tieba_crawler.settings import Settings
-from tieba_crawler_api.tieba_crawler.tieba.client import TiebaAPI
-from tieba_crawler_api.tieba_crawler.tieba.mappers import thread_to_row, image_tasks_from_thread, detect_collection_from_title
+from tieba_crawler.db.repo import Repo
+from tieba_crawler.settings import Settings
+from tieba_crawler.tieba.client import TiebaAPI
+from tieba_crawler.tieba.mappers import thread_to_row, image_tasks_from_thread, detect_collection_from_title
 
 log = logging.getLogger(__name__)
 

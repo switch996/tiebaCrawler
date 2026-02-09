@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from tieba_crawler_api.tieba_crawler.db.repo import Repo
-from tieba_crawler_api.tieba_crawler.settings import Settings
-from tieba_crawler_api.tieba_crawler.tieba.mappers import detect_collection_from_title
+from tieba_crawler.db.repo import Repo
+from tieba_crawler.settings import Settings
+from tieba_crawler.tieba.mappers import detect_collection_from_title
 
 log = logging.getLogger(__name__)
 
