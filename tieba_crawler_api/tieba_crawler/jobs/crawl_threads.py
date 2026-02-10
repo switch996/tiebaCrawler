@@ -30,12 +30,8 @@ async def crawl_threads(
     overlap_seconds = overlap_seconds if overlap_seconds is not None else settings.overlap_seconds
     max_pages = max_pages if max_pages is not None else settings.max_pages
 
-    api = TiebaAPI(
-        bduss=settings.bduss,
-        stoken=settings.stoken,
-        try_ws=settings.try_ws,
-        request_attempts=settings.request_attempts,
-    )
+    pool = settings.account_pool
+    log.info("crawl_threads: using %d account(s) for rotation.", pool.size)
 
     now_ts = int(time.time())
     state = repo.get_forum_state(forum)
@@ -59,6 +55,16 @@ async def crawl_threads(
         if pn > 1:
             sleep_ms = random.randint(settings.page_sleep_ms_min, settings.page_sleep_ms_max)
             await asyncio.sleep(sleep_ms / 1000)
+
+        # --- Account rotation: pick next account for each page ---
+        account = pool.next()
+        api = TiebaAPI(
+            bduss=account.bduss,
+            stoken=account.stoken,
+            try_ws=settings.try_ws,
+            request_attempts=settings.request_attempts,
+        )
+        log.debug("Page %d using account: %s", pn, account)
 
         threads = await api.get_threads_page_with_retry(forum, pn=pn, rn=rn)
 

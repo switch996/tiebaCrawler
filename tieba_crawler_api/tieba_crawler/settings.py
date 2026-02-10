@@ -6,6 +6,9 @@ import os
 from pathlib import Path
 from typing import Any
 
+from tieba_crawler.tieba.account_pool import AccountPool
+
+
 def _env_int(key: str, default: int) -> int:
     v = os.getenv(key)
     if v is None or v == "":
@@ -36,9 +39,12 @@ class Settings:
     db_url: str
     data_dir: Path
 
-    # auth (optional)
+    # auth — single-account fallback (kept for backward compat)
     bduss: str
     stoken: str
+
+    # multi-account pool
+    account_pool: AccountPool
 
     # defaults
     default_forum: str
@@ -84,11 +90,25 @@ class Settings:
                     norm[str(k)] = [v]
             collection_rules = norm
 
+        bduss = os.getenv("BDUSS", "")
+        stoken = os.getenv("STOKEN", "")
+
+        # Parse multi-account list from ACCOUNTS_JSON env var
+        # Format: [{"bduss":"...", "stoken":"...", "label":"account-1"}, ...]
+        accounts_json = _env_json("ACCOUNTS_JSON", None)
+
+        account_pool = AccountPool.from_json_or_single(
+            accounts_json=accounts_json,
+            bduss=bduss,
+            stoken=stoken,
+        )
+
         return Settings(
             db_url=os.getenv("DB_URL", "sqlite:///data/tieba.db"),
             data_dir=Path(os.getenv("DATA_DIR", "data")),
-            bduss=os.getenv("BDUSS", ""),
-            stoken=os.getenv("STOKEN", ""),
+            bduss=bduss,
+            stoken=stoken,
+            account_pool=account_pool,
             default_forum=os.getenv("FORUM", ""),
             timezone=os.getenv("TIMEZONE", "Asia/Shanghai"),
             threads_rn=_env_int("THREADS_RN", 50),

@@ -99,12 +99,14 @@ async def relay_labeled_threads(
     max_images: Optional[int] = None,
     lookback_days: Optional[int] = None,
 ) -> None:
+    pool = settings.account_pool
+
     # Only require auth when actually posting
     if not dry_run:
-        if not settings.bduss:
+        if not pool.has_authenticated:
             raise SystemExit(
-                "BDUSS/STOKEN required for add_post. Please set them in .env "
-                "(not required for --dry-run)"
+                "At least one account with BDUSS is required for add_post. "
+                "Set ACCOUNTS_JSON or BDUSS in .env (not required for --dry-run)"
             )
 
     mode = mode or settings.relay_mode
@@ -181,13 +183,6 @@ async def relay_labeled_threads(
         repo.close()
         return
 
-    api = TiebaAPI(
-        bduss=settings.bduss,
-        stoken=settings.stoken,
-        try_ws=False,
-        request_attempts=1,
-    )
-
     task_ids = [int(t["id"]) for t in tasks]
 
     if dry_run:
@@ -201,6 +196,7 @@ async def relay_labeled_threads(
                 author_id=int(t.get("author_id") or 0),
                 create_time=int(t.get("create_time") or 0),
                 text=t.get("text") or "",
+                image_urls=[],
                 mode=mode,
                 max_text_chars=max_text_chars,
                 max_images=max_images,
@@ -213,12 +209,24 @@ async def relay_labeled_threads(
         repo.close()
         return
 
+    log.info("relay: using %d account(s) for posting rotation.", pool.size)
+
     # Step 3: post sequentially with strong rate limiting
     for idx, t in enumerate(tasks):
         task_id = int(t["id"])
         source_tid = int(t["source_tid"])
         target_tid = int(t["target_tid"])
         target_forum = str(t["target_forum"])
+
+        # --- Account rotation: pick a random account for each post ---
+        account = pool.random()
+        api = TiebaAPI(
+            bduss=account.bduss,
+            stoken=account.stoken,
+            try_ws=False,
+            request_attempts=1,
+        )
+        log.debug("Relay task %d using account: %s", task_id, account)
 
         content = build_reply_content(
             source_tid=source_tid,
@@ -227,6 +235,7 @@ async def relay_labeled_threads(
             author_id=int(t.get("author_id") or 0),
             create_time=int(t.get("create_time") or 0),
             text=t.get("text") or "",
+            image_urls=[],
             mode=mode,
             max_text_chars=max_text_chars,
             max_images=max_images,
@@ -242,7 +251,7 @@ async def relay_labeled_threads(
             ok = _bool_response_ok(resp)
             if ok:
                 repo.mark_relay_done(task_id)
-                log.info("Relay posted: source_tid=%s -> target_tid=%s (task_id=%s)", source_tid, target_tid, task_id)
+                log.info("Relay posted: source_tid=%s -> target_tid=%s (task_id=%s account=%s)", source_tid, target_tid, task_id, account)
             else:
                 repo.mark_relay_error(task_id, f"add_post returned not-ok: {resp!r}")
                 log.warning("Relay failed(not-ok): task_id=%s source_tid=%s resp=%r", task_id, source_tid, resp)
