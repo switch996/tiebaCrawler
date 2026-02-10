@@ -355,16 +355,15 @@ def create_app() -> FastAPI:
             tuple(params),
         ).fetchone()["c"]
 
-        img_status = repo.conn().execute(
+        img_total = repo.conn().execute(
             """
-            SELECT images.status AS status, COUNT(1) AS c
+            SELECT COUNT(1) AS c
             FROM images
-            JOIN threads ON threads.tid = images.tid
+                     JOIN threads ON threads.tid = images.tid
             """
-            + ("WHERE threads.fname=?" if s.default_forum else "")
-            + " GROUP BY images.status",
+            + ("WHERE threads.fname=?" if s.default_forum else ""),
             tuple(params),
-        ).fetchall()
+        ).fetchone()["c"]
 
         relay_status = repo.conn().execute(
             """
@@ -389,7 +388,7 @@ def create_app() -> FastAPI:
         return {
             "forum": s.default_forum or None,
             "threads_total": int(threads_total or 0),
-            "images_by_status": {r["status"]: int(r["c"]) for r in img_status},
+            "images_total": int(img_total or 0),
             "relay_tasks_by_status": {r["status"]: int(r["c"]) for r in relay_status},
             "threads_by_category": {str(r["category"]): int(r["c"]) for r in cat_counts},
         }
